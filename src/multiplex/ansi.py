@@ -1,4 +1,6 @@
 import io
+import os
+import sys
 
 from easyansi import screen, cursor, drawing, attributes
 from easyansi import colors_rgb as colors
@@ -79,7 +81,15 @@ def restore():
 
 
 def get_size():
-    return screen.get_size()
+    # Query the live tty directly. shutil.get_terminal_size() (used by
+    # easyansi) prefers the COLUMNS/LINES env vars, which are frozen at
+    # shell startup and never update on resize. That silently breaks
+    # redraws whenever those vars happen to be exported.
+    try:
+        size = os.get_terminal_size(sys.stdout.fileno())
+        return size.columns, size.lines
+    except (AttributeError, ValueError, OSError):
+        return screen.get_size()
 
 
 def clear():

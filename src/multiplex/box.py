@@ -263,7 +263,13 @@ class TextBox:
         raw_line = self.buffer.wrapping_buffer.self_to_raw.get(self.state.buffer_start_line, 0)
         self.buffer.width = width
         if self.state.wrap and (not self.state.auto_scroll or self.state.stream_done):
-            self.state.buffer_start_line = self.buffer.wrapping_buffer.raw_to_self[raw_line]
+            mapped = self.buffer.wrapping_buffer.raw_to_self.get(raw_line)
+            if mapped is None:
+                # The anchor line has no mapping at the new width (e.g. it was an
+                # empty line that produced no wrapped lines). Clamp the current
+                # position into the new buffer's valid range instead of crashing.
+                mapped = max(self.min_start_line, min(self.max_start_line, self.state.buffer_start_line))
+            self.state.buffer_start_line = mapped
 
     def _set_min_max_motion(self, value, min_value):
         self.state.buffer_start_line = max(min_value, min(self.max_start_line, value))
