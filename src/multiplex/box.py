@@ -24,6 +24,7 @@ class BoxState:
         self.input_mode = False
         self.stream_done = False
         self.collapsed = False
+        self.pending = False
         self.buffer_start_line = 0
         self.first_column = 0
         self.view_longest_line = 0

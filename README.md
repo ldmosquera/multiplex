@@ -33,6 +33,20 @@ for zone in ['z1', 'z2', 'z3']:
 mp.run()
 ```
 
+### Limiting Parallelism
+
+By default every command runs at once. To cap how many run concurrently (like
+`xargs -P` / GNU parallel `-j`), use `-P` / `--max-parallelism`. All boxes are
+still created up front; the ones beyond the cap wait as queued placeholders
+(`⏳`) and start in order as slots free. `0` or omitting the flag means unlimited.
+
+```shell script
+mp -P 4 './worker.py --zone z1' './worker.py --zone z2' ... 
+```
+
+Only command boxes are gated; passive sources (`file://`, Python generators,
+`Controller`s) are unaffected.
+
 ### Dynamically Add Commands
 
 `my-script.sh`:

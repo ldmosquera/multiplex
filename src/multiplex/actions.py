@@ -25,6 +25,14 @@ class SetTitle(BoxAction):
         iterator.title = title
 
 
+class Activate(BoxAction):
+    """Transition a pending (queued) box to active: expand it so output shows."""
+
+    def run(self, box_holder):
+        box_holder.state.pending = False
+        box_holder.state.collapsed = False
+
+
 class ToggleCollapse(BoxAction):
     def __init__(self, value=None):
         self.value = value

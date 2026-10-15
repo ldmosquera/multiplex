@@ -15,7 +15,7 @@ from typing import Any
 import aiofiles
 from aiostream.stream import create, combine
 from multiplex import ansi
-from multiplex.actions import SetTitle, BoxActions, UpdateMetadata
+from multiplex.actions import SetTitle, BoxActions, UpdateMetadata, Activate
 from multiplex.ansi import C, theme
 from multiplex.controller import Controller
 from multiplex.process import Process
@@ -23,6 +23,17 @@ from multiplex.refs import SPLIT, STOP
 
 MULTIPLEX_SOCKET_PATH = "MULTIPLEX_SOCKET_PATH"
 MULTIPLEX_STREAM_ID = "MULTIPLEX_STREAM_ID"
+
+
+def is_command(obj):
+    """True if ``obj`` would spawn a subprocess (a shell command string or a
+    ``Process``), as opposed to a passive source like ``file://``/``asciinema://``.
+    """
+    if isinstance(obj, Process):
+        return True
+    if isinstance(obj, str):
+        return not obj.startswith(("file://", "asciinema://"))
+    return False
 
 
 async def stream_reader_generator(reader):
@@ -160,7 +171,7 @@ def _coroutine_to_iterator(cor):
     return loop.run_until_complete(cor)
 
 
-def _process_to_iterator(process, title, master, slave, context):
+def _process_stream_generator(process, title, master, slave, context):
     handle: asyncio.Future = context.get("handle")
 
     async def exit_stream():
@@ -208,7 +219,11 @@ def _process_to_iterator(process, title, master, slave, context):
             ]
         )
 
-    obj = g()
+    return g()
+
+
+def _process_to_iterator(process, title, master, slave, context):
+    obj = _process_stream_generator(process, title, master, slave, context)
     title = _extract_title(title, process)
     inner_type = "async_process"
 
@@ -218,6 +233,45 @@ def _process_to_iterator(process, title, master, slave, context):
         except ProcessLookupError:
             pass
 
+    return obj, title, inner_type, {"close": close}
+
+
+def _gated_process_to_iterator(process_desc, title, context):
+    """Like ``_process_to_iterator`` but the subprocess is not spawned until the
+    box is admitted through ``context['gate']``. Until then the box stays pending
+    (collapsed placeholder) and the generator simply blocks on the gate.
+    """
+    gate = context["gate"]
+    if isinstance(process_desc, str):
+        process_desc = Process(process_desc)
+    holder = {"process": None}
+
+    def close():
+        process = holder["process"]
+        if process is not None:
+            try:
+                process.kill()
+            except ProcessLookupError:
+                pass
+
+    async def g():
+        await gate.acquire()
+        try:
+            # Spawn before yielding so the process starts during this pull; a
+            # yield here would suspend the generator and defer the spawn until
+            # the merge re-pulls it, which it does not do promptly.
+            process, (master, slave) = _process_descriptor_to_iterator(process_desc, context)
+            process = await process
+            holder["process"] = process
+            yield Activate()
+            async for data in _process_stream_generator(process, title, master, slave, context):
+                yield data
+        finally:
+            gate.release()
+
+    obj = g()
+    title = _extract_title(title, process_desc)
+    inner_type = "async_process"
     return obj, title, inner_type, {"close": close}
 
 
@@ -291,6 +345,9 @@ def _callable_to_iterator(cb, title):
 
 
 async def _to_iterator(obj, title, context):
+    gate = context.get("gate")
+    if gate is not None and is_command(obj):
+        return _gated_process_to_iterator(obj, title, context)
     master, slave = None, None
     if isinstance(obj, str):
         obj, title, (master, slave) = _str_to_iterator(obj, title, context)

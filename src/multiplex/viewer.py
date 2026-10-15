@@ -19,7 +19,8 @@ from multiplex.enums import ViewLocation, BoxLine
 from multiplex.exceptions import EndViewer
 from multiplex.export import Export
 from multiplex.help import HelpViewState
-from multiplex.iterator import Descriptor
+from multiplex.gate import Gate
+from multiplex.iterator import Descriptor, is_command
 from multiplex.refs import REDRAW, RECALC, SPLIT, QUIT, ALL_DOWN, OUTPUT_SAVED, SAVE, STREAM_DONE
 
 logger = logging.getLogger("multiplex.view")
@@ -67,7 +68,7 @@ class DescriptorQueueItem:
 
 
 class Viewer:
-    def __init__(self, descriptors, box_height, auto_collapse, verbose, socket_path, output_path, buffer_lines):
+    def __init__(self, descriptors, box_height, auto_collapse, verbose, socket_path, output_path, buffer_lines, max_parallelism=None):
         self.holders = []
         self.stream_id_to_holder = {}
         self.holder_to_stream_id = {}
@@ -83,6 +84,8 @@ class Viewer:
         self.verbose = verbose
         self.socket_path = socket_path
         self.output_path = output_path
+        self.max_parallelism = max_parallelism
+        self.gate = Gate(max_parallelism) if max_parallelism else None
         self.current_focused_box = 0
         self.current_view_line = 0
         self.maximized = False
@@ -237,6 +240,7 @@ class Viewer:
                 "stream_id": stream_id,
                 "cwd": descriptor.cwd,
                 "env": descriptor.env,
+                "gate": self.gate,
             },
         )
         box_height = descriptor.box_height or self.box_height
@@ -246,6 +250,11 @@ class Viewer:
             state.wrap = descriptor.wrap
         if descriptor.collapsed is not None:
             state.collapsed = descriptor.collapsed
+        if self.gate is not None and is_command(descriptor.obj):
+            # Queued behind the concurrency gate: show as a collapsed placeholder
+            # until it is admitted (the iterator's Activate action expands it).
+            state.pending = True
+            state.collapsed = True
         self.holders.append(holder)
         if redraw:
             self.events.send_redraw()
@@ -446,6 +455,8 @@ class Viewer:
         title = iterator.title
         if not isinstance(title, C):
             title = C(title)
+        if box_state.pending:
+            title = C("⏳ ", title)
         title_len = len(title)
         hr_space = 4
         _ellipsis = "..."
@@ -456,7 +467,9 @@ class Viewer:
 
         logger.debug(f"s{index}:\t{screen_y}\t{location}\t[{self.lines},{self.cols}]")
 
-        if index == self.current_focused_box:
+        if box_state.pending:
+            hline_color = ansi.theme.TITLE_PENDING
+        elif index == self.current_focused_box:
             hline_color = ansi.theme.TITLE_FOCUS
         elif box_state.stream_done:
             hline_color = ansi.theme.TITLE_STREAM_DONE

@@ -37,7 +37,7 @@ async def ipc_mode(socket_path, process, title, box_height, wait, load):
         await client.batch(actions)
 
 
-def direct_mode(process, title, verbose, box_height, auto_collapse, output_path, load, socket_path, buffer_lines):
+def direct_mode(process, title, verbose, box_height, auto_collapse, output_path, load, socket_path, buffer_lines, max_parallelism):
     multiplex = Multiplex(
         verbose=verbose,
         box_height=box_height[0],
@@ -45,6 +45,7 @@ def direct_mode(process, title, verbose, box_height, auto_collapse, output_path,
         output_path=output_path,
         socket_path=socket_path,
         buffer_lines=buffer_lines,
+        max_parallelism=max_parallelism,
     )
     for p, t, h in zip(process, cycle(title), cycle(box_height)):
         multiplex.add(p, title=t, box_height=h)
@@ -86,6 +87,13 @@ def validate(box_height, process, socket_path, title, wait, load):
 @click.argument("process", nargs=-1)
 @click.option("-t", "--title", multiple=True)
 @click.option("-b", "--box-height", type=int, multiple=True)
+@click.option(
+    "-P",
+    "--max-parallelism",
+    type=int,
+    default=None,
+    help="Run at most this many command boxes concurrently; the rest stay queued until a slot frees. 0 or omitted = unlimited.",
+)
 @click.option("--wait/--no-wait", "-w/-W", multiple=True, default=None)
 @click.option("-l", "--load")
 @click.option(
@@ -123,8 +131,12 @@ def validate(box_height, process, socket_path, title, wait, load):
 @click.version_option(None, "--version")
 @click.option("-v", "--verbose", is_flag=True)
 def main(
-    process, title, verbose, box_height, auto_collapse, output_path, wait, load, socket_path, buffer_lines, server
+    process, title, verbose, box_height, auto_collapse, output_path, wait, load, socket_path, buffer_lines, server, max_parallelism
 ):
+    if max_parallelism is not None and max_parallelism < 0:
+        raise click.ClickException("--max-parallelism must be >= 0")
+    if max_parallelism == 0:
+        max_parallelism = None
     validate(
         box_height=box_height,
         process=process,
@@ -163,6 +175,7 @@ def main(
             load=load,
             socket_path=socket_path,
             buffer_lines=buffer_lines,
+            max_parallelism=max_parallelism,
         )
 
 
